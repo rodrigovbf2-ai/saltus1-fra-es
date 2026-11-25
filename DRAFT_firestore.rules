@@ -1,0 +1,312 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Global Hardened Helpers (Phase 3)
+    // -------------------------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrapAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'rmcbcc@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrapAdmin() ||
+        (isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Entity Validation Blueprints (Phase 2 / Pillar 2)
+    // -------------------------------------------------------------------------
+    function isValidDevelopment(data) {
+      return data.keys().hasAll([
+          'name', 'subtitle', 'floorLabel', 'floorPlanUrl',
+          'isPublished', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'subtitle', 'floorLabel', 'floorPlanUrl',
+          'isPublished', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.subtitle is string && data.subtitle.size() <= 180 &&
+        data.floorLabel is string && data.floorLabel.size() >= 1 && data.floorLabel.size() <= 40 &&
+        data.floorPlanUrl is string && data.floorPlanUrl.size() >= 1 && data.floorPlanUrl.size() <= 900000 &&
+        data.isPublished is bool &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUnit(data, developmentId) {
+      return data.keys().hasAll([
+          'developmentId', 'code', 'typology', 'floor', 'areaSqm', 'price',
+          'orientation', 'status', 'x', 'y', 'width', 'height',
+          'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'developmentId', 'code', 'typology', 'floor', 'areaSqm', 'price',
+          'orientation', 'status', 'x', 'y', 'width', 'height',
+          'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.developmentId) &&
+        data.developmentId == developmentId &&
+        data.code is string && data.code.size() >= 1 && data.code.size() <= 32 &&
+        data.typology is string && data.typology.size() >= 1 && data.typology.size() <= 24 &&
+        data.floor is string && data.floor.size() >= 1 && data.floor.size() <= 32 &&
+        (data.areaSqm is int || data.areaSqm is float) && data.areaSqm > 0 && data.areaSqm <= 10000 &&
+        (data.price is int || data.price is float) && data.price >= 0 && data.price <= 100000000 &&
+        data.orientation is string && data.orientation.size() <= 40 &&
+        data.status in ['disponivel', 'reservado', 'vendido'] &&
+        (data.x is int || data.x is float) && data.x >= 0 && data.x <= 100 &&
+        (data.y is int || data.y is float) && data.y >= 0 && data.y <= 100 &&
+        (data.width is int || data.width is float) && data.width >= 2 && data.width <= 100 &&
+        (data.height is int || data.height is float) && data.height >= 2 && data.height <= 100 &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUnitPrivateNote(data, developmentId, unitId) {
+      return data.keys().hasAll([
+          'developmentId', 'unitId', 'buyerName', 'buyerContact',
+          'notes', 'ownerId', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'developmentId', 'unitId', 'buyerName', 'buyerContact',
+          'notes', 'ownerId', 'updatedAt'
+        ]) &&
+        isValidId(data.developmentId) && data.developmentId == developmentId &&
+        isValidId(data.unitId) && data.unitId == unitId &&
+        data.buyerName is string && data.buyerName.size() <= 120 &&
+        data.buyerContact is string && data.buyerContact.size() <= 120 &&
+        data.notes is string && data.notes.size() <= 1000 &&
+        isValidId(data.ownerId) &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActivityLog(data, developmentId) {
+      return data.keys().hasAll([
+          'developmentId', 'unitId', 'unitCode', 'previousStatus',
+          'newStatus', 'actorUid', 'actorName', 'ownerId', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'developmentId', 'unitId', 'unitCode', 'previousStatus',
+          'newStatus', 'actorUid', 'actorName', 'ownerId', 'createdAt'
+        ]) &&
+        isValidId(data.developmentId) && data.developmentId == developmentId &&
+        isValidId(data.unitId) &&
+        data.unitCode is string && data.unitCode.size() >= 1 && data.unitCode.size() <= 32 &&
+        data.previousStatus in ['disponivel', 'reservado', 'vendido', 'novo'] &&
+        data.newStatus in ['disponivel', 'reservado', 'vendido'] &&
+        isValidId(data.actorUid) && data.actorUid == request.auth.uid &&
+        data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 120 &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt']) &&
+        data.keys().hasOnly(['email', 'role', 'createdAt']) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.role == 'admin' &&
+        data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Connection Probe Document (SDK Connectivity Check)
+    // -------------------------------------------------------------------------
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Admins Collection
+    // -------------------------------------------------------------------------
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && isVerifiedUser() && (request.auth.uid == userId || isAdmin());
+      allow list: if isBootstrapAdmin();
+      allow create: if isValidId(userId) && isBootstrapAdmin() &&
+        isValidAdminUser(incoming()) &&
+        incoming().createdAt == request.time;
+      allow update: if isValidId(userId) && isBootstrapAdmin() &&
+        isValidAdminUser(incoming()) &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['email', 'role']);
+      allow delete: if isValidId(userId) && isBootstrapAdmin();
+    }
+
+    // -------------------------------------------------------------------------
+    // Developments Collection
+    // -------------------------------------------------------------------------
+    match /developments/{developmentId} {
+      allow get: if isValidId(developmentId) && (
+        existing().isPublished == true ||
+        (isVerifiedUser() && existing().ownerId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if resource.data.isPublished == true ||
+        (isVerifiedUser() && resource.data.ownerId == request.auth.uid) ||
+        isBootstrapAdmin();
+
+      allow create: if isValidId(developmentId) &&
+        isVerifiedUser() &&
+        isValidDevelopment(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(developmentId) &&
+        isVerifiedUser() &&
+        isValidDevelopment(incoming()) &&
+        (existing().ownerId == request.auth.uid || isAdmin()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'subtitle', 'floorLabel', 'floorPlanUrl', 'isPublished', 'updatedAt'
+        ]);
+
+      allow delete: if isValidId(developmentId) &&
+        isVerifiedUser() &&
+        (existing().ownerId == request.auth.uid || isAdmin());
+
+      // -----------------------------------------------------------------------
+      // Units Subcollection
+      // -----------------------------------------------------------------------
+      match /units/{unitId} {
+        allow get: if isValidId(developmentId) && isValidId(unitId) && (
+          get(/databases/$(database)/documents/developments/$(developmentId)).data.isPublished == true ||
+          (isVerifiedUser() && existing().ownerId == request.auth.uid) ||
+          isAdmin()
+        );
+        allow list: if resource.data.status in ['disponivel', 'reservado', 'vendido'] ||
+          (isVerifiedUser() && resource.data.ownerId == request.auth.uid) ||
+          isBootstrapAdmin();
+
+        allow create: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          isValidUnit(incoming(), developmentId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/developments/$(developmentId)) &&
+          (
+            (incoming().ownerId == request.auth.uid &&
+             get(/databases/$(database)/documents/developments/$(developmentId)).data.ownerId == request.auth.uid) ||
+            isAdmin()
+          );
+
+        allow update: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          isValidUnit(incoming(), developmentId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().developmentId == existing().developmentId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/developments/$(developmentId)) &&
+          (existing().ownerId == request.auth.uid || isAdmin()) &&
+          (
+            // Action: Quick Status Change
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+            // Action: Full Unit Details / Position Update
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'code', 'typology', 'floor', 'areaSqm', 'price',
+              'orientation', 'status', 'x', 'y', 'width', 'height', 'updatedAt'
+            ])
+          );
+
+        allow delete: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          (existing().ownerId == request.auth.uid || isAdmin());
+      }
+
+      // -----------------------------------------------------------------------
+      // Private Buyer / Reservation Notes Subcollection (Strict PII Isolation)
+      // -----------------------------------------------------------------------
+      match /unitNotes/{unitId} {
+        allow get: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          (existing().ownerId == request.auth.uid || isAdmin());
+
+        allow list: if isVerifiedUser() &&
+          (resource.data.ownerId == request.auth.uid || isBootstrapAdmin());
+
+        allow create: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          isValidUnitPrivateNote(incoming(), developmentId, unitId) &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/developments/$(developmentId)) &&
+          (
+            (incoming().ownerId == request.auth.uid &&
+             get(/databases/$(database)/documents/developments/$(developmentId)).data.ownerId == request.auth.uid) ||
+            isAdmin()
+          );
+
+        allow update: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          isValidUnitPrivateNote(incoming(), developmentId, unitId) &&
+          incoming().developmentId == existing().developmentId &&
+          incoming().unitId == existing().unitId &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().updatedAt == request.time &&
+          (existing().ownerId == request.auth.uid || isAdmin()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'buyerName', 'buyerContact', 'notes', 'updatedAt'
+          ]);
+
+        allow delete: if isValidId(developmentId) && isValidId(unitId) &&
+          isVerifiedUser() &&
+          (existing().ownerId == request.auth.uid || isAdmin());
+      }
+
+      // -----------------------------------------------------------------------
+      // Activity Logs Subcollection (Immutable Admin Audit Trail)
+      // -----------------------------------------------------------------------
+      match /activityLogs/{logId} {
+        allow get: if isValidId(developmentId) && isValidId(logId) &&
+          isVerifiedUser() &&
+          (existing().ownerId == request.auth.uid || isAdmin());
+
+        allow list: if isVerifiedUser() &&
+          (resource.data.ownerId == request.auth.uid || isBootstrapAdmin());
+
+        allow create: if isValidId(developmentId) && isValidId(logId) &&
+          isVerifiedUser() &&
+          isValidActivityLog(incoming(), developmentId) &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/developments/$(developmentId)) &&
+          (
+            (incoming().ownerId == request.auth.uid &&
+             get(/databases/$(database)/documents/developments/$(developmentId)).data.ownerId == request.auth.uid) ||
+            isAdmin()
+          );
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

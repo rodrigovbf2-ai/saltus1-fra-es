@@ -1,0 +1,6 @@
+{
+  "name": "PlantaViva",
+  "description": "Plataforma de gestão em tempo real da disponibilidade de frações e plantas arquitetónicas de empreendimentos imobiliários.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
